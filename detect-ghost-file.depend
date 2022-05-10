@@ -1,0 +1,12 @@
+# depslib dependency file v1.0
+1652215023 source:c:\users\bruce.eng\documents\detect-ghost-file\main.cpp
+	<iostream>
+	<conio.h>
+	"windows.h"
+	"winternl.h"
+	<stdio.h>
+	"status-map.h"
+
+1652213451 c:\users\bruce.eng\documents\detect-ghost-file\status-map.h
+	<ntstatus.h>
+
