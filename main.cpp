@@ -56,19 +56,204 @@ typedef NTSTATUS (__stdcall *NtCreateFilePtr)(
     PVOID EaBuffer,
     ULONG EaLength );
 
+typedef NTSTATUS (__stdcall *NtDeleteFilePtr)(
+    OBJECT_ATTRIBUTES *ObjectAttributes
+);
+
+/**
+ * Function pointer declaration for internal NT routine to write data to file.
+ * For documentation on the NtWriteFile routine, see ZwWriteFile on MSDN.
+ */
+typedef NTSTATUS (NTAPI *NtWriteFilePtr)(
+  IN    HANDLE                  aFileHandle,
+  IN    HANDLE                  aEvent,
+  IN    PIO_APC_ROUTINE         aApc,
+  IN    PVOID                   aApcCtx,
+  OUT   PIO_STATUS_BLOCK        aIoStatus,
+  IN    PVOID                   aBuffer,
+  IN    ULONG                   aLength,
+  IN    PLARGE_INTEGER          aOffset,
+  IN    PULONG                  aKey
+);
+
 typedef VOID (__stdcall *RtlInitUnicodeStringPtr) (
     IN OUT PUNICODE_STRING  DestinationString,
     IN PCWSTR  SourceString );
 
 #define BUFSIZE 4096
 
-//int main(int argc, char *argv[])
+int createTestFile() {
+
+    //now resolve to a complete path
+    WCHAR buffer[BUFSIZE] = L"";
+    GetFullPathNameW(L"ghost-file-test.txt", BUFSIZE, buffer, NULL);
+    std::wstring fileName = L"\\??\\" + std::wstring(buffer);
+
+    UNICODE_STRING fn;
+    OBJECT_ATTRIBUTES object;
+    IO_STATUS_BLOCK ioStatus;
+    NtCreateFilePtr pNtCreateFile;
+    NtWriteFilePtr pNtWriteFile;
+    NtDeleteFilePtr pNtDeleteFile;
+    RtlInitUnicodeStringPtr pRtlInitUnicodeString;
+    HANDLE fileHandle;
+    HANDLE fileHandle2;
+    NTSTATUS status;
+    HMODULE hMod;
+
+    /* Get access to ntdll functions.  This will fail on Win9x. */
+    hMod = LoadLibraryA("ntdll.dll");
+    if (!hMod) {
+	printf("SKIP: Could not load ntdll.dll\n");
+	exit(0);
+    }
+
+    pNtCreateFile = (NtCreateFilePtr) GetProcAddress(hMod, "NtCreateFile");
+    if (!pNtCreateFile) {
+	  printf("FAIL: Could not locate NtCreateFile\n");
+	  exit(1);
+    }
+
+    pNtWriteFile = (NtWriteFilePtr) GetProcAddress(hMod, "NtWriteFile");
+    if (!pNtWriteFile) {
+	  printf("FAIL: Could not locate NtWriteFile\n");
+	  exit(1);
+    }
+
+    pNtDeleteFile = (NtDeleteFilePtr) GetProcAddress(hMod, "NtDeleteFile");
+    if (!pNtDeleteFile) {
+	  printf("FAIL: Could not locate NtDeleteFile\n");
+	  exit(1);
+    }
+
+    pRtlInitUnicodeString = (RtlInitUnicodeStringPtr) GetProcAddress(hMod, "RtlInitUnicodeString");
+
+    /* Create a file using NtCreateFile */
+    memset(&ioStatus, 0, sizeof(ioStatus));
+    memset(&object, 0, sizeof(object));
+    object.Length = sizeof(object);
+    object.Attributes = OBJ_CASE_INSENSITIVE;
+    pRtlInitUnicodeString(&fn, fileName.c_str());
+    object.ObjectName = &fn;
+
+	status = pNtCreateFile(&fileHandle, FILE_GENERIC_WRITE, &object, &ioStatus, NULL,
+	  FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_DELETE | FILE_SHARE_WRITE, FILE_CREATE, 0, NULL,
+	  0);
+
+    if (!NT_SUCCESS(status)) {
+	  printf("FAIL: Could not create ghost file.\n");
+	  const char *statusString = status_to_string(status);
+
+	  std::cout << "Status: " << (void *)status;
+	  if (statusString) {
+        std::cout << " (" << statusString << ")\n";
+	  }
+	  else {
+        std::cout << " (STATUS_UNKNOWN)\n";
+	  }
+	  exit(1);
+    }
+    else {
+        std::cout << "Successfully created ghost file.\n";
+    }
+
+    IO_STATUS_BLOCK IoStatusBlock;
+
+    //now try to write something to it.
+
+    std::string testText = "Hello. I am a ghost file.\n";
+
+    LARGE_INTEGER fileOffset;
+    fileOffset.HighPart = 0;
+    fileOffset.LowPart = 0;
+
+    status = pNtWriteFile(fileHandle,
+                         NULL,
+                         NULL,
+                         NULL,
+                         &IoStatusBlock,
+                         (PVOID) testText.c_str(),
+                         testText.size(),
+                         &fileOffset,
+                         NULL);
+
+
+    if (!NT_SUCCESS(status)) {
+	  printf("FAIL: Could not write to the ghost file.\n");
+	  const char *statusString = status_to_string(status);
+
+	  std::cout << "Status: " << (void *)status;
+	  if (statusString) {
+        std::cout << " (" << statusString << ")\n";
+	  }
+	  else {
+        std::cout << " (STATUS_UNKNOWN)\n";
+	  }
+	  exit(1);
+    }
+    else {
+        std::cout << "Successfully wrote to ghost file.\n";
+    }
+
+    //now open a second handle to the ghost file
+    /*
+    status = pNtCreateFile(&fileHandle2, FILE_READ_DATA, &object, &ioStatus, NULL,
+	  FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_DELETE | FILE_SHARE_WRITE, FILE_OPEN, 0, NULL,
+	  0);
+    if (!NT_SUCCESS(status)) {
+	  printf("FAIL: Could not open a second handle to the ghost file.\n");
+	  const char *statusString = status_to_string(status);
+
+	  std::cout << "Status: " << (void *)status;
+	  if (statusString) {
+        std::cout << " (" << statusString << ")\n";
+	  }
+	  else {
+        std::cout << " (STATUS_UNKNOWN)\n";
+	  }
+	  exit(1);
+    }
+    else {
+        std::cout << "Successfully opened a second handle to ghost file.\n";
+    }
+    */
+
+    //try to delete the file
+    status = pNtDeleteFile(&object);
+    if (!NT_SUCCESS(status)) {
+	  printf("FAIL: Could not delete the ghost file.\n");
+	  const char *statusString = status_to_string(status);
+
+	  std::cout << "Status: " << (void *)status;
+	  if (statusString) {
+        std::cout << " (" << statusString << ")\n";
+	  }
+	  else {
+        std::cout << " (STATUS_UNKNOWN)\n";
+	  }
+	  exit(1);
+    }
+    else {
+        std::cout << "Successfully made a pending delete on the ghost file.\n";
+    }
+
+    std::cout << "Press a key to end. The ghost file will exist until this process ends.\n";
+	getch();
+
+	//how can we end without cleanup?
+     //auto self = GetCurrentProcess();
+     //NtTerminateProcess(self, 42);
+
+
+    return 0;
+}
+
+
 int main(int argc, char *argv[])
 {
    LPWSTR *szArglist;
    int nArgs;
    int i;
-
 
    std::wstring fileName = L"";
 
@@ -82,6 +267,12 @@ int main(int argc, char *argv[])
      if (nArgs < 2) {
         std::wcout << L"Expected a filename. Did not receive enough arguments.\n";
         return(1);
+     }
+
+     if (std::wstring(szArglist[1]) == std::wstring(L"/test")) {
+        std::cout << "Testing...\n";
+        createTestFile();
+        return(2);
      }
 
      //now resolve to a complete path
